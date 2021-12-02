@@ -28,6 +28,8 @@
  *
  */
 #include <linux/input.h>
+#include <unistd.h>
+#include <SDL/SDL.h>
 
 /*
  * Defines & Macros
@@ -37,6 +39,13 @@
 #define INDR_MAXDEV                   0xf
 #define INDR_SIZEOF_BIT_ARRAY(bits)   ((bits + 7) / 8)
 #define INDR_TEST_BIT(bit, array)     (array[bit/8] & (1<<(bit%8)))
+
+/*
+ * structure : internal driver data
+ */
+typedef struct {
+	int n;
+} LINUXHIDRV_INTERNAL, *LINUXHIDRV_INTERNALP;
 
 /*
  * Enum : Device Type
@@ -160,7 +169,7 @@ void INDR_dumpdev(INDR_DEVICEP dev) {
  * Function : Init Input Device
  *
  */
-byte INDR_init(AINPUTP me) {
+byte INDR_init_linux(AINPUTP me) {
   /* Allocating Internal Data */
   INDR_INTERNALP mi = (INDR_INTERNALP) malloc(sizeof(INDR_INTERNAL));
   /* Cleanup */
@@ -564,6 +573,100 @@ byte INDR_getinput(AINPUTP me, AINPUT_EVENTP dest_ev) {
   /* It was exit message */
   LOGV("INDR_getinput Input Driver Already Released\n");
   return AINPUT_EV_RET_EXIT;
+}
+
+
+/*
+ * forward functions
+ */
+void LINUXHIDRV_release(
+		AINPUTP me);
+byte LINUXHIDRV_getinput(
+		AINPUTP me,
+		AINPUT_EVENTP dest_ev);
+
+/*
+ * function : init input device
+ */
+byte INDR_init(
+		AINPUTP me) {
+	/* allocating internal data */
+	LINUXHIDRV_INTERNALP mi = (LINUXHIDRV_INTERNALP)
+		calloc(sizeof(LINUXHIDRV_INTERNAL),1);
+
+	/* set internal address */
+	me->internal = (voidp) mi;
+
+	/* set driver callbacks */
+	me->cb_release		= &LINUXHIDRV_release;
+	me->cb_getinput	 = &LINUXHIDRV_getinput;
+
+	/* ok */
+	return 1;
+}
+
+/*
+ * function : release input driver instance
+ */
+void LINUXHIDRV_release(
+		AINPUTP me) {
+	/* is input instance initialized ? */
+	if (me == NULL) {
+		return;
+	}
+	/* free internal data */
+	free(me->internal);
+	me->internal = NULL;
+}
+
+static byte __sdl_mouse_down = 0;
+
+/*
+ * function : get input callback
+ */
+byte LINUXHIDRV_getinput(
+		AINPUTP me,
+		AINPUT_EVENTP dest_ev) {
+	/* get internal data */
+	// LINUXHIDRV_INTERNALP mi = (LINUXHIDRV_INTERNALP) me->internal;
+	SDL_Event event;
+
+	/* polling loop */
+	do {
+		if(SDL_PollEvent(&event)) {
+			switch(event.type) {
+				case SDL_QUIT:
+					return AINPUT_EV_RET_EXIT;
+
+				case SDL_MOUSEBUTTONDOWN:
+				case SDL_MOUSEBUTTONUP:
+
+					dest_ev->type	 = AINPUT_EV_TYPE_TOUCH;
+					dest_ev->key		= 0;
+					dest_ev->x			= event.button.x;
+					dest_ev->y			= event.button.y;
+					dest_ev->state	= (event.type==SDL_MOUSEBUTTONDOWN?
+						AINPUT_EV_STATE_DOWN:AINPUT_EV_STATE_UP);
+					__sdl_mouse_down = dest_ev->state;
+					return AINPUT_EV_RET_TOUCH;
+
+				case SDL_MOUSEMOTION:
+					if (__sdl_mouse_down==AINPUT_EV_STATE_DOWN){
+						dest_ev->type	 = AINPUT_EV_TYPE_TOUCH;
+						dest_ev->key		= 0;
+						dest_ev->x			= event.motion.x;
+						dest_ev->y			= event.motion.y;
+						dest_ev->state	= AINPUT_EV_STATE_MOVE;
+						return AINPUT_EV_RET_TOUCH;
+					}
+			}
+		}
+	}
+	while (me->internal != NULL);
+
+	/* it was exit message */
+	ALOGV("LINUXHIDRV_getinput Input Driver Already Released");
+	return AINPUT_EV_RET_EXIT;
 }
 
 /*

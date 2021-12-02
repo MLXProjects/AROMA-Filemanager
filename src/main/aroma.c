@@ -50,10 +50,10 @@ char * getArgv(int id) {
 //*
 //* Show Text Splash
 //*
-void a_splash(char * spipe) {
-  int fd      = atoi(spipe);
-  acmd_pipe   = fdopen(fd, "wb");
-  setlinebuf(acmd_pipe);
+void a_splash(/*char * spipe*/) {
+  //int fd      = atoi(spipe);
+  acmd_pipe   = stdout;//fdopen(fd, "wb");
+  //setlinebuf(acmd_pipe);
   //#-- Print Info Into Recovery
   fprintf(apipe(), "ui_print\n");
   fprintf(apipe(), "ui_print " AROMA_NAME " version " AROMA_VERSION "\n");
@@ -108,34 +108,28 @@ int main(int argc, char ** argv) {
   parent_pid = getppid();
   LOGS("Initializing\n");
   //* Normal Updater Sequences
-  setbuf(stdout, NULL);
-  setbuf(stderr, NULL);
+  //setbuf(stdout, NULL);
+  //setbuf(stderr, NULL);
   //* Init Temporary Directory
   remove_directory(AROMA_TMP);
   create_directory(AROMA_TMP);
   
   //* Check Arguments
-  if (argc != 4) {
+  /*if (argc != 4) {
     LOGE("Unexpected Number of Arguments (%d)\n", argc);
     return 1;
-  }
-  
-  //* Check CWM Version
-  if ((argv[1][0] != '1' && argv[1][0] != '2' && argv[1][0] != '3') || argv[1][1] != '\0') {
-    LOGE("Wrong Updater Binary API!!! Expected 1, 2, or 3, But got %s\n", argv[1]);
-    return 2;
-  }
+  }*/
   
   //* Save to Argument
   LOGS("Saving Arguments\n");
   snprintf(currArgv[0], 255, "%s", argv[1]);
-  snprintf(currArgv[1], 255, "%s", argv[3]);
+  //snprintf(currArgv[1], 255, "%s", argv[3]);
   //* Init Pipe & Show Splash Info
-  a_splash(argv[2]);
+  a_splash(/*argv[1]*/);
   //* Init Zip
   LOGS("Open Archive\n");
   
-  if (az_init(argv[3])) {
+  if (az_init(argv[1])) {
     //* Initializing All Resources
     LOGS("Initializing Resource\n");
     a_init_all();
@@ -144,7 +138,7 @@ int main(int argc, char ** argv) {
     if (parent_pid) {
       LOGS("Mute Parent\n");
       aroma_memory_parentpid(parent_pid);
-      kill(parent_pid, 19);
+      //kill(parent_pid, 19);
     }
     
     //* Starting AROMA FILEMANAGER UI
@@ -177,7 +171,7 @@ int main(int argc, char ** argv) {
     //* Unmute Parent
     if (parent_pid) {
       LOGS("Unmute Parent\n");
-      kill(parent_pid, 18);
+      //kill(parent_pid, 18);
     }
     
     //* Wait Until Clean Up
@@ -199,7 +193,7 @@ int main(int argc, char ** argv) {
   else{
     LOGS("Exit Status: 0 - Normal\n");
   }
-  fclose(acmd_pipe);
+  //fclose(acmd_pipe);
   //* MEMORY DEBUG
 #ifndef _AROMA_NODEBUG
   aroma_dump_malloc();

@@ -26,6 +26,8 @@
 #include <linux/fb.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "../aroma.h"
 
 static int colorspace_positions[4] = {0, 0, 0, 0};

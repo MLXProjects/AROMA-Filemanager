@@ -32,6 +32,14 @@
 #ifdef LIBAROMA_CONFIG_OPENMP
   #include <omp.h>
 #endif
+#include <fcntl.h>
+#ifdef _WIN32
+#include <mman.h>
+#else
+#include <sys/mman.h>
+#endif
+#include <unistd.h>
+#include <SDL/SDL.h>
 
 typedef struct _LINUXFBDR_INTERNAL LINUXFBDR_INTERNAL;
 typedef struct _LINUXFBDR_INTERNAL * LINUXFBDR_INTERNALP;
@@ -79,6 +87,29 @@ struct _LINUXFBDR_INTERNAL{
   QCOMFB_INTERNALP  qcom;               /* qcom fb internal data */
 };
 
+typedef struct _SDLFBDR_INTERNAL SDLFBDR_INTERNAL;
+typedef struct _SDLFBDR_INTERNAL * SDLFBDR_INTERNALP;
+
+/*
+ * structure : internal framebuffer data
+ */
+struct _SDLFBDR_INTERNAL{
+	SDL_Surface* window;									/* framebuffer handler */
+	int			 fb_sz;											/* framebuffer memory size */
+	voidp		 buffer;										 /* direct buffer */
+	int			 stride;										 /* stride size */
+	int			 line;											 /* line size */
+	byte			depth;											/* color depth */
+	byte			pixsz;											/* memory size per pixel */
+	byte			rgb_pos[6];								 /* framebuffer 32bit rgb position */
+	
+	byte      active;                     /* thread active */
+	pthread_t thread;                     /* flush thread handle */
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+	
+};
+
 /* release function */
 void LINUXFBDR_release(LIBAROMA_FBP me);
 
@@ -99,5 +130,20 @@ void LINUXFBDR_swap_buffer(LINUXFBDR_INTERNALP mi);
 
 /* flush receiver thread */
 static void * LINUXFBDR_flush_receiver(void * cookie);
+
+/* release function */
+void SDLFBDR_release(LIBAROMA_FBP me);
+
+/* flush function */
+byte SDLFBDR_flush(LIBAROMA_FBP me);
+
+/* start post */
+byte SDLFBDR_start_post(LIBAROMA_FBP me);
+
+/* end post */
+byte SDLFBDR_end_post(LIBAROMA_FBP me);
+
+/* flush receiver thread */
+static void * SDLFBDR_flush_receiver(void * cookie);
 
 #endif /* __libaroma_linux_fb_driver_h__ */

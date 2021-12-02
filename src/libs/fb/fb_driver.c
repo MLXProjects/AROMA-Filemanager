@@ -30,6 +30,23 @@
 #include "fb_colorspace/fb_32bit.c" /* 32 bit */
 #include "fb_qcom/fb_qcom.c" /* qcom overlay */
 
+#ifndef ALOGD
+#define ALOGD(...) printf(__VA_ARGS__); \
+printf("\n")
+#endif
+#ifndef ALOGV
+#define ALOGV(...) printf(__VA_ARGS__); \
+printf("\n")
+#endif
+#ifndef ALOGI
+#define ALOGI(...) printf(__VA_ARGS__); \
+printf("\n")
+#endif
+#ifndef ALOGE
+#define ALOGE(...) printf(__VA_ARGS__); \
+printf("\n")
+#endif
+
 /*
  * Function    : LINUXFBDR_init
  * Return Value: byte
@@ -444,12 +461,217 @@ void LINUXFBDR_dump(LINUXFBDR_INTERNALP mi) {
 } /* End of LINUXFBDR_dump */
 
 /*
+ * Function		: SDLFBDR_post
+ * Return Value: byte
+ * Descriptions: post data
+ */
+byte SDLFBDR_sync(
+	LIBAROMA_FBP me, wordp __restrict src,
+	int x, int y, int w, int h
+){
+	if (me == NULL) {
+		return 0;
+	}
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP) me->internal;
+	//printf("aroma/v: syncing framebuffer %dx%d (%d, %d)\n", w, h, x, y);
+	libaroma_mutex_lock(mi->mutex);
+	int copy_stride = me->w-w;
+	wordp copy_dst =
+	(wordp)  (mi->buffer+(mi->line*y)+(x*mi->pixsz));
+	wordp copy_src =
+	(wordp) (src);
+	libaroma_blt_align16(copy_dst, copy_src, w, h,
+						 mi->stride + (copy_stride * mi->pixsz),
+						 copy_stride * 2
+	);
+	pthread_cond_signal(&mi->cond);
+	libaroma_mutex_unlock(mi->mutex);
+	return 1;
+}
+
+/*
+ * Function		: SDLFBDR_post
+ * Return Value: byte
+ * Descriptions: post data
+ */
+byte SDLFBDR_post(
+	LIBAROMA_FBP me, wordp __restrict src,
+	int dx, int dy, int dw, int dh,
+	int sx, int sy, int sw, int sh
+){
+	if (me == NULL) {
+		return 0;
+	}
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP) me->internal;
+	int sstride = (sw - dw) * 2;
+	int dstride = (mi->line - (dw * mi->pixsz));
+	wordp copy_dst =
+	(wordp) (mi->buffer+(mi->line * dy)+(dx * mi->pixsz));
+	wordp copy_src =
+	(wordp) (src + (sw * sy) + sx);
+	libaroma_blt_align16(
+		copy_dst,
+		copy_src,
+		dw, dh,
+		dstride,
+		sstride
+	);
+	return 1;
+}
+
+
+/*
+ * Function    : SDLFBDR_flush_receiver
+ * Return Value: static void *
+ * Descriptions: flush signal receiver
+ */
+static void * SDLFBDR_flush_receiver(void * cookie){
+	LIBAROMA_FBP me=(LIBAROMA_FBP) cookie;
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP) me->internal;
+	while (mi->active){
+		pthread_mutex_lock(&mi->mutex);
+		pthread_cond_wait(&mi->cond, &mi->mutex);
+		SDLFBDR_flush(me);
+		pthread_mutex_unlock(&mi->mutex);
+	}
+	return NULL;
+} /* End of SDLFBDR_flush_receiver */
+
+/*
+ * Function		: SDLFBDR_init
+ * Return Value: byte
+ * Descriptions: init framebuffer
+ */
+byte SDLFBDR_init(LIBAROMA_FBP me) {
+	ALOGV("SDLFBDR initialized internal data");
+	
+	/* allocating internal data */
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP)
+	calloc(sizeof(SDLFBDR_INTERNAL),1);
+	if (!mi) {
+		ALOGE("SDLFBDR calloc internal data - memory error");
+		return 0;
+	}
+	
+	if(SDL_Init(SDL_INIT_VIDEO) < 0) {
+		ALOGE("Couldn't init SDL: %s", SDL_GetError());
+		return 0;
+	}
+	
+	/* init mutex & cond */
+	pthread_mutex_init(&mi->mutex,NULL);
+	pthread_cond_init(&mi->cond,NULL);
+	
+	/* set internal address */
+	me->internal = (voidp) mi;
+	
+	/* set the title bar */
+	SDL_WM_SetCaption("AROMA", "AROMA");
+	
+	/* set release callback */
+	me->release = &SDLFBDR_release;	
+	
+	mi->window = SDL_SetVideoMode(360, 600, 16, SDL_HWSURFACE);
+	if(!mi->window){
+		ALOGE("SDLFBDR could not create SDL hardware surface");
+		mi->window = SDL_SetVideoMode (360, 600, 16, SDL_SWSURFACE);
+	}
+	if(!mi->window) {
+		ALOGE("SDLFBDR could not create SDL surface");
+		goto error;
+	}
+	
+	/* set libaroma framebuffer instance values */
+	me->w = mi->window->w;		/* width */
+	me->h = mi->window->h;		/* height */
+	me->sz= me->w * me->h;		/* width x height */
+	
+	/* set internal useful data */
+	mi->buffer		 = mi->window->pixels;
+	mi->depth		 = mi->window->format->BitsPerPixel;
+	mi->pixsz		 = mi->window->format->BytesPerPixel;
+	mi->line		 = me->w * mi->pixsz;
+	mi->fb_sz		 =(me->sz * mi->pixsz);
+	
+	/* swap buffer now */
+	SDLFBDR_flush(me);
+	
+	/* start flush receiver */
+	mi->active=1;
+	pthread_create(&mi->thread,NULL,SDLFBDR_flush_receiver,(void *) me);
+	
+	mi->stride = mi->line - (me->w * mi->pixsz);
+	me->sync				= &SDLFBDR_sync;
+	me->snapshoot	 = NULL;
+	
+	ALOGI("SDL BUFFER INFORMATIONS:");
+	ALOGI(" width               : %i", me->w);
+	ALOGI(" height              : %i", me->h);
+	ALOGI(" bits_per_pixel      : %i", mi->depth);
+	ALOGD(" pixsz               : %i", mi->pixsz);
+	ALOGD(" line                : %i", mi->line);
+	ALOGD(" fb_size             : %i", mi->fb_sz);
+	ALOGD(" stride              : %i", mi->stride);
+	
+	/* ok */
+	goto ok;
+	/* return */
+	error:
+	free(mi);
+	return 0;
+	ok:
+	return 1;
+} /* End of SDLFBDR_init */
+
+/*
+ * Function		: SDLFBDR_release
+ * Return Value: void
+ * Descriptions: release framebuffer driver
+ */
+void SDLFBDR_release(LIBAROMA_FBP me) {
+	if (me==NULL) {
+		return;
+	}
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP) me->internal;
+	if (mi==NULL){
+		return;
+	}
+	
+	SDL_Quit();
+	
+	/* destroy mutex & cond */
+	libaroma_mutex_free(mi->mutex);
+	
+	/* free internal data */
+	ALOGV("SDLFBDR free internal data");
+	free(me->internal);
+} /* End of SDLFBDR_release */
+
+/*
+ * Function		: SDLFBDR_flush
+ * Return Value: byte
+ * Descriptions: flush content into display & wait for vsync
+ */
+byte SDLFBDR_flush(LIBAROMA_FBP me) {
+	if (me == NULL) {
+		return 0;
+	}
+	SDLFBDR_INTERNALP mi = (SDLFBDR_INTERNALP) me->internal;
+	
+	// fsync(mi->fb);
+	SDL_Flip(mi->window);
+	
+	return 1;
+} /* End of SDLFBDR_flush */
+
+/*
  * Function    : __linux_fb_driver_init
  * Return Value: byte
  * Descriptions: init function for libaroma fb
  */
 byte __linux_fb_driver_init(LIBAROMA_FBP me) {
-  return LINUXFBDR_init(me);
+  //return LINUXFBDR_init(me);
+  return SDLFBDR_init(me);
 } /* End of __linux_fb_driver_init */
 
 #endif /* __libaroma_linux_fb_driver_c__ */

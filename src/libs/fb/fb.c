@@ -189,8 +189,8 @@ byte libaroma_fb_sync() {
     _libaroma_fb->canvas,
     0,
     0,
-    0,
-    0);
+    _libaroma_fb->w,
+	_libaroma_fb->h);
 } /* End of libaroma_fb_sync */
 
 /*
